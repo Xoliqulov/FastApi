@@ -1,11 +1,18 @@
+from datetime import timedelta, datetime
 from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException
+from jose import jwt
 from pydantic import BaseModel
 
 from db import User, SessionLocal
 
 app = FastAPI()
+
+SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 
 class UserCreate(BaseModel):
@@ -28,6 +35,14 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
 
 
+def create_jwt_token(data, expires_delta):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + expires_delta
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm="HS256")
+    return encoded_jwt
+
+
 @app.get("/users/", response_model=List[UserResponse])
 def get_users():
     db = SessionLocal()
@@ -36,15 +51,24 @@ def get_users():
     return users
 
 
-@app.post("/users/", response_model=UserResponse)
+@app.post("/users/", response_model=dict)
 def create_user(user: UserCreate):
     db = SessionLocal()
-    db_user = User(**user.dict())
+    user_data = user.dict()
+
+    access_token = create_jwt_token(user_data, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    refresh_token = create_jwt_token(user_data, timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
+
+    db_user = User(**user_data)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    db.close()
-    return db_user
+
+    return {
+        "user": user_data,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
 
 
 @app.patch("/users/{user_id}", response_model=UserResponse)
